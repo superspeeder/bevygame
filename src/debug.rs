@@ -7,9 +7,9 @@ pub struct ValidationSystemSet;
 #[derive(SystemSet, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DebugDisplaySystemSet;
 
-marker!(DebugOnly);
+marker!(DebugMarker);
 flag_component!(DebugEnabled);
-flag_state!(DebugMode)
+flag_state!(DebugMode);
 
 pub(crate) fn plugin(app: &mut App) {
     app.configure_sets(
@@ -26,25 +26,28 @@ pub(crate) fn plugin(app: &mut App) {
 }
 
 pub mod debug_display {
-    use bevy::prelude::*;
-    use crate::debug::{DebugEnabled, DebugOnly};
+    use crate::debug::{DebugDisplaySystemSet, DebugEnabled, DebugMarker, DebugMode};
     use crate::marker;
+    use bevy::prelude::*;
 
     marker!(DebugErrorMessage);
 
     pub(super) fn plugin(app: &mut App) {
-
+        app.insert_state(DebugMode(cfg!(feature = "debugging")))
+            .add_systems(
+                Update,
+                (manage_visibility1.run_if(in_state(DebugMode(true)))).in_set(DebugDisplaySystemSet),
+            );
     }
 
-    pub fn manage_visibility1(mut query: Query<(Mut<Visibility>), Without<DebugEnabled>>) {
-        for (mut visibility, _) in query.iter_mut() {}
+    pub fn manage_visibility1(mut query: Query<(Mut<Visibility>, Has<DebugEnabled>), With<DebugMarker>>) {
+        for (mut visibility, enabled) in query.iter_mut() {
+            *visibility = if enabled { Visibility::Inherited } else { Visibility::Hidden };
+        }
     }
-
 }
 
 pub mod validation {
-    use bevy::ecs::query::QueryFilter;
-    use bevy::ecs::system::EntityCommands;
     use bevy::prelude::*;
 
     #[derive(Debug, Eq, PartialEq, Clone, Event)]
@@ -52,6 +55,7 @@ pub mod validation {
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     #[non_exhaustive]
+    #[allow(dead_code)]
     pub enum ValidationCheck {
         ExactlyN(usize),
         AtLeastN(usize),
@@ -60,23 +64,22 @@ pub mod validation {
     }
 
     impl ValidationCheck {
+        #[allow(dead_code)]
         pub fn make_message(&self, message: String) -> String {
             format!("{:?}: {}", self, message)
         }
     }
 
+    #[allow(dead_code)]
     pub trait ComponentValidator<T: Component> {
         fn validate_component(value: &T) -> Result<(), String>;
-    }
-
-    pub trait ComponentWithCommandsValidator<T: Component> {
-        fn validate_component(value: T, commands: EntityWorldMut) -> Result<(), String>;
     }
 
     pub fn plugin(app: &mut App) {
         app.add_event::<ValidationErrorEvent>();
     }
 
+    #[allow(dead_code)]
     pub fn exactly_n<T: Component, const N: usize>(
         query: Query<Entity, With<T>>,
         mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
@@ -87,6 +90,7 @@ pub mod validation {
         }
     }
 
+    #[allow(dead_code)]
     pub fn at_least_n<T: Component, const N: usize>(
         query: Query<Entity, With<T>>,
         mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
@@ -97,6 +101,7 @@ pub mod validation {
         }
     }
 
+    #[allow(dead_code)]
     pub fn at_most_n<T: Component, const N: usize>(
         query: Query<Entity, With<T>>,
         mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
@@ -108,68 +113,34 @@ pub mod validation {
     }
 
     //noinspection DuplicatedCode
+    #[allow(dead_code)]
     pub fn component_validator<T: Component, V: ComponentValidator<T>>(
         query: Query<&T>,
         mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
     ) {
-        query.par_iter().for_each(|component| {
+        for component in query.iter() {
             if let Err(msg) = V::validate_component(component) {
                 validation_error_state_writer.send(ValidationErrorEvent(
                     msg,
                     ValidationCheck::ComponentValidationError,
                 ));
             }
-        })
+        }
     }
 
     //noinspection DuplicatedCode
-    pub fn component_validator_commands<T: Component, V: ComponentWithCommandsValidator<T>>(
-        query: Query<(Entity, &T)>,
-        mut par_commands: ParallelCommands,
-        mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
-    ) {
-        query.par_iter().for_each(|(entity, component)| {
-            par_commands.command_scope(|mut c| c.entity(entity).add(|mut e: EntityWorldMut| {
-                if let Err(msg) = V::validate_component(component, e) {
-                    validation_error_state_writer.send(ValidationErrorEvent(
-                        msg,
-                        ValidationCheck::ComponentValidationError,
-                    ));
-                }
-            }));
-        });
-    }
-
-    //noinspection DuplicatedCode
+    #[allow(dead_code)]
     pub fn conservative_component_validator<T: Component, V: ComponentValidator<T>>(
         query: Query<&T, Changed<T>>,
         mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
     ) {
-        query.par_iter().for_each(|component| {
+        for component in query.iter() {
             if let Err(msg) = V::validate_component(component) {
                 validation_error_state_writer.send(ValidationErrorEvent(
                     msg,
                     ValidationCheck::ComponentValidationError,
                 ));
             }
-        })
-    }
-
-    //noinspection DuplicatedCode
-    pub fn conservative_component_validator_commands<T: Component, V: ComponentWithCommandsValidator<T>>(
-        query: Query<(Entity, &T), Changed<T>>,
-        mut par_commands: ParallelCommands,
-        mut validation_error_state_writer: EventWriter<ValidationErrorEvent>,
-    ) {
-        query.par_iter().for_each(|(entity, component)| {
-            par_commands.command_scope(|mut c| c.entity(entity).add(|mut e: EntityWorldMut| {
-                if let Err(msg) = V::validate_component(component, e) {
-                    validation_error_state_writer.send(ValidationErrorEvent(
-                        msg,
-                        ValidationCheck::ComponentValidationError,
-                    ));
-                }
-            }));
-        });
+        }
     }
 }
